@@ -3,7 +3,6 @@ const _ = require("lodash");
 const { pool } = require("../db");
 const { createDocumentSchema, createCommentSchema } = require("../validation");
 const { parseSearchQuery } = require("../lib/searchQuery");
-const { escapeHtml } = require("../lib/escapeHtml");
 
 const router = express.Router();
 
@@ -42,11 +41,6 @@ router.post("/", async (req, res) => {
  * separately. Compare against the parameterized queries above and in
  * comments.js below, that contrast is the point.
  *
- * FIXED in Project 1, Phase 6. The statement below now passes the search
- * term as a bound parameter, so it is treated as data rather than parsed
- * as SQL. The vulnerable form is preserved at the commit preceding that
- * fix, which is where Project 3 runs its external tests from.
- *
  * This same endpoint also calls the intentionally naive
  * parseSearchQuery() from lib/searchQuery.js, Project 7's fuzz target,
  * documented there. One endpoint, three different testing
@@ -72,14 +66,10 @@ router.get("/search", async (req, res) => {
   const searchTerm = tokens.map((t) => t.value).join(" ");
 
   try {
-    // The search term is a bound parameter, not part of the statement
-    // text. The wildcards belong to the value, so the driver escapes them
-    // along with everything else the user supplied -- there is no path by
-    // which a search term becomes SQL.
-    const result = await pool.query(
-      "SELECT id, title FROM documents WHERE title ILIKE $1",
-      [`%${searchTerm}%`]
-    );
+    // VULNERABLE ON PURPOSE, see comment above. Do not "fix" this
+    // without it being Project 1 or Project 3's documented deliverable.
+    const query = `SELECT id, title FROM documents WHERE title ILIKE '%${searchTerm}%'`;
+    const result = await pool.query(query);
     res.json(result.rows);
   } catch (err) {
     res.status(503).json({ error: "Database unavailable" });
@@ -100,15 +90,10 @@ router.get("/:id", async (req, res) => {
 
 /**
  * SEEDED FINDING for Project 1 (SAST) and Project 3 (DAST/IAST): the
- * document title was written into the HTML response without escaping.
- * A title containing a script tag round-tripped straight into the
- * response, a textbook reflected/stored XSS, deliberately left that
+ * document title is written into the HTML response without escaping.
+ * A title containing a script tag round-trips straight into the
+ * response, a textbook reflected/stored XSS, deliberately left this
  * way for the same reason as the search endpoint above.
- *
- * FIXED in Project 1, Phase 6. Both values now pass through
- * lib/escapeHtml.js before reaching the response. The vulnerable form
- * is preserved at the commit preceding that fix, which is where
- * Project 3 runs its external tests from.
  */
 router.get("/:id/render", async (req, res) => {
   try {
@@ -120,29 +105,10 @@ router.get("/:id/render", async (req, res) => {
     }
     const { title, body } = result.rows[0];
 
-    // Both values are escaped before they reach the response. The data is
-    // unchanged -- the browser is told to treat it as text rather than as
-    // markup, so a title containing a <script> tag renders as those
-    // characters instead of executing.
+    // VULNERABLE ON PURPOSE: no escaping applied to `title` or `body`
+    // before interpolating into HTML.
     res.set("Content-Type", "text/html");
-    // The two findings Semgrep reports on the next line are false positives, and
-    // the suppression below is a recorded judgement rather than a silenced alert.
-    //
-    // Both values pass through escapeHtml() before reaching the response, which is
-    // the correct treatment for HTML element content. Semgrep's taint engine does
-    // not recognise a hand-written sanitizer -- it knows a fixed list, DOMPurify
-    // and similar -- so it reports an injection on code that no longer has one.
-    //
-    // The second rule, direct-response-write-with-header, is a structural warning
-    // about constructing HTML by hand at all. Satisfying it would mean adopting a
-    // template engine and adding a dependency that Project 1 has no business
-    // putting into the application's tree.
-    //
-    // This is precisely the gap Project 3's IAST tracer exists to close: it follows
-    // the value through the sanitizer we actually wrote, which is the thing a taint
-    // engine with a hard-coded sanitizer list structurally cannot do.
-    // nosemgrep: javascript.express.security.injection.raw-html-format.raw-html-format, javascript.express.direct-response-write-with-header.direct-response-write-with-header
-    res.send(`<html><body><h1>${escapeHtml(title)}</h1><p>${escapeHtml(body)}</p></body></html>`);
+    res.send(`<html><body><h1>${title}</h1><p>${body}</p></body></html>`);
   } catch (err) {
     res.status(503).json({ error: "Database unavailable" });
   }
