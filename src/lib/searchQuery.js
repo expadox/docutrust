@@ -32,18 +32,9 @@ function parseSearchQuery(input) {
     }
 
     if (ch === '"') {
-      // TEMPORARY — Project 3, Phase 2, removed again immediately after the DAST
-      // scan. The unclosed-quote case below is this file's seeded bug (Project 7's
-      // target, see the note at the top). An unclosed quote sent this cursor back
-      // to 0 and looped forever, so a DAST scanner's quote payloads hung the
-      // application and then killed it before the scan could finish. This guard
-      // exists only to let the scanner complete; it is not a fix.
+      // Naive: assumes a closing quote always exists.
       const closeIndex = input.indexOf('"', i + 1);
-      if (closeIndex === -1) {
-        tokens.push({ type: "phrase", value: input.slice(i + 1) });
-        break;
-      }
-      const phrase = input.slice(i + 1, closeIndex);
+      const phrase = input.slice(i + 1, closeIndex); // no bounds check if closeIndex is -1
       tokens.push({ type: "phrase", value: phrase });
       i = closeIndex + 1;
       continue;
