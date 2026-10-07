@@ -1,3 +1,9 @@
+// Required before the router, and that ordering is load-bearing. src/lib/iast.js
+// wraps escapeHtml, and routes/documents.js destructures that function at load
+// time — so a router loaded first keeps the unwrapped original, the wrapper
+// never runs, and the tracer reports a sanitised value as if it were tainted.
+const { iastMiddleware } = require("./lib/iast");
+const { raspMiddleware } = require("./lib/rasp");
 const express = require("express");
 const { pool } = require("./db");
 const documentsRouter = require("./routes/documents");
@@ -7,6 +13,14 @@ const PORT = process.env.PORT || 3000;
 const APP_VERSION = process.env.APP_VERSION || "dev";
 
 app.use(express.json());
+// RASP goes first, and as close to the wire as it can while still seeing a
+// parsed body — a request it refuses should be refused before any other code
+// in the application runs. The tracer then goes after it, so a blocked request
+// is never confused with one that reached a sink.
+app.use(raspMiddleware);
+// After the body parser, so req.body is populated and the tracer can see it,
+// and before the router, so every handler in the application is covered.
+app.use(iastMiddleware);
 app.use("/documents", documentsRouter);
 
 app.get("/healthz", async (req, res) => {
